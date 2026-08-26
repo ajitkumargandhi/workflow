@@ -2,24 +2,24 @@ import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 't
 import { Request } from './request.entity';
 import { User } from './user.entity';
 
-@Entity('approval_logs')
-export class ApprovalLog {
+@Entity('request_updates')
+export class RequestUpdate {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => Request)
+  @ManyToOne(() => Request, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'request_id' })
   request: Request;
 
-  @ManyToOne(() => User)
-  @JoinColumn({ name: 'approver_id' })
-  approver: User;
+  @ManyToOne(() => User, { nullable: true })
+  @JoinColumn({ name: 'agent_id' })
+  agent: User;
 
-  @Column({ type: 'varchar', length: 20 })
-  action: 'Approve' | 'Reject' | 'SendBack';
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  status: string;
 
-  @Column({ type: 'text', nullable: true })
-  comments: string;
+  @Column({ type: 'text' })
+  note: string;
 
   @Column({ type: 'timestamp with time zone', default: () => 'CURRENT_TIMESTAMP' })
   timestamp: Date;
