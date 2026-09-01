@@ -24,6 +24,11 @@ const SupportDashboard = () => {
     fetchFilteredRequests();
   }, [currentUser]);
 
+  useEffect(() => {
+    setSelectedRequest(null);
+    setRequestDetails(null);
+  }, [viewMode]);
+
   const fetchFilteredRequests = async () => {
     try {
       setLoading(true);
