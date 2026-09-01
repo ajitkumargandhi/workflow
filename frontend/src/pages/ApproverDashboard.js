@@ -18,11 +18,34 @@ const ApproverDashboard = () => {
     fetchPending();
   }, [currentUser]);
 
+  useEffect(() => {
+    setSelectedRequest(null);
+    setActionComments('');
+  }, [viewMode]);
+
   const fetchPending = async () => {
     try {
       setLoading(true);
       const data = await requestService.getMyRequests('all');
-      const pending = data.filter(req => req.status === 'Pending');
+      
+      const pending = data.filter(req => {
+        if (req.status !== 'Pending') return false;
+        if (!req.current_step) return false;
+        
+        const reqRole = req.current_step.approverRole;
+        if (!reqRole) return false;
+        
+        const userRole = typeof currentUser.role === 'string' ? currentUser.role : (currentUser.role?.role_name || '');
+        
+        if (reqRole.role_name === 'Approver') {
+          const isDesignated = req.designated_manager?.id === currentUser.id;
+          const isLineManager = req.requestor?.manager?.id === currentUser.id;
+          return isDesignated || isLineManager || userRole === 'Super Admin';
+        }
+        
+        return userRole === reqRole.role_name || userRole === 'Super Admin';
+      });
+      
       setPendingRequests(pending);
     } catch (err) {
       console.error('Error fetching requests', err);
