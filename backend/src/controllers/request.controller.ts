@@ -1,9 +1,11 @@
-import { Controller, Get, Post, Body, Param, Put, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Put, Query, UseGuards } from '@nestjs/common';
 import { RequestService } from '../services/request.service';
 import { WorkflowService } from '../services/workflow.service';
 import { Request } from '../entities/request.entity';
+import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 
 @Controller('requests')
+@UseGuards(JwtAuthGuard)
 export class RequestController {
   constructor(
     private readonly requestService: RequestService,
@@ -70,5 +72,20 @@ export class RequestController {
     @Body() body: { userId: string; notes?: string }
   ) {
     return this.requestService.closeRequest(id, body.userId, body.notes);
+  }
+
+  @Put(':id')
+  async update(
+    @Param('id') id: string,
+    @Body() body: {
+      justification?: string;
+      total_cost?: number;
+      currency?: string;
+      fulfillment_type?: string;
+      designated_manager_id?: string;
+      status?: 'Pending' | 'Approved' | 'In Progress' | 'Rejected' | 'SentBack' | 'Fulfilled' | 'Closed';
+    }
+  ) {
+    return this.requestService.updateRequest(id, body);
   }
 }
