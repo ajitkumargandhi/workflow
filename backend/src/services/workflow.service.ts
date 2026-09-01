@@ -101,6 +101,20 @@ export class WorkflowService {
         throw new BadRequestException('No pending approval step remaining for this request');
       }
 
+      // Validate if the user is authorized to approve this step
+      const reqRole = currentStepInfo.approverRole;
+      if (reqRole && reqRole.role_name === 'Approver') {
+        const isDesignated = request.designated_manager?.id === approverId;
+        const isLineManager = request.requestor?.manager?.id === approverId;
+        if (!isDesignated && !isLineManager && approver.role.role_name !== 'Super Admin') {
+          throw new BadRequestException('You are not the designated manager or line manager for this request');
+        }
+      } else if (reqRole) {
+        if (approver.role.id !== reqRole.id && approver.role.role_name !== 'Super Admin') {
+          throw new BadRequestException(`This step requires approval from a user with the role "${reqRole.role_name}"`);
+        }
+      }
+
       // Log approval decision
       const log = this.approvalLogRepository.create({
         request: { id: requestId },
