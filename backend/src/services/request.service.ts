@@ -7,6 +7,8 @@ import { RequestAttachment } from '../entities/request-attachment.entity';
 import { RequestUpdate } from '../entities/request-update.entity';
 import { ApprovalLog } from '../entities/approval-log.entity';
 import { User } from '../entities/user.entity';
+import { Category } from '../entities/category.entity';
+import { WorkflowService } from './workflow.service';
 
 @Injectable()
 export class RequestService {
@@ -23,7 +25,25 @@ export class RequestService {
     private approvalLogRepository: Repository<ApprovalLog>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(Category)
+    private categoryRepository: Repository<Category>,
+    private workflowService: WorkflowService,
   ) {}
+
+  private async enrichRequest(req: Request): Promise<any> {
+    let currentStep = null;
+    try {
+      currentStep = await this.workflowService.getCurrentStep(req.id);
+    } catch (e) {
+      // Ignore
+    }
+    return {
+      ...req,
+      primary_category: req.category?.parent?.name || req.category?.name || 'General',
+      secondary_category: req.category?.parent ? req.category.name : 'N/A',
+      current_step: currentStep,
+    };
+  }
 
   async createRequest(
     data: Partial<Request> & { category_id?: number; designated_manager_id?: string },
@@ -39,6 +59,20 @@ export class RequestService {
       totalCost = 0;
     }
 
+    const category = await this.categoryRepository.findOne({
+      where: { id: categoryId },
+      relations: { parent: true },
+    });
+
+    let initialStatus: Request['status'] = 'Pending';
+    if (category) {
+      const isSupport = category.name.toLowerCase().includes('support') || 
+                        (category.parent && category.parent.name.toLowerCase().includes('support'));
+      if (isSupport) {
+        initialStatus = 'Approved';
+      }
+    }
+
     const newRequest = this.requestRepository.create({
       tracking_id: trackingId,
       requestor: data.requestor ? { id: data.requestor.id } : null,
@@ -49,7 +83,7 @@ export class RequestService {
       fulfillment_type: data.fulfillment_type || 'New Purchase',
       justification: data.justification,
       urgency: data.urgency || 'Medium',
-      status: 'Pending',
+      status: initialStatus,
     });
 
     const savedRequest = await this.requestRepository.save(newRequest);
@@ -95,11 +129,7 @@ export class RequestService {
       });
     }
 
-    return requests.map(req => ({
-      ...req,
-      primary_category: req.category?.parent?.name || req.category?.name || 'General',
-      secondary_category: req.category?.parent ? req.category.name : 'N/A',
-    }));
+    return Promise.all(requests.map(req => this.enrichRequest(req)));
   }
 
   async getActionedRequests(userId: string): Promise<any[]> {
@@ -141,11 +171,7 @@ export class RequestService {
       order: { updated_at: 'DESC' },
     });
 
-    return requests.map(req => ({
-      ...req,
-      primary_category: req.category?.parent?.name || req.category?.name || 'General',
-      secondary_category: req.category?.parent ? req.category.name : 'N/A',
-    }));
+    return Promise.all(requests.map(req => this.enrichRequest(req)));
   }
 
   async getRequestDetails(id: string): Promise<any> {
@@ -175,10 +201,18 @@ export class RequestService {
       order: { timestamp: 'ASC' },
     });
 
+    let currentStep = null;
+    try {
+      currentStep = await this.workflowService.getCurrentStep(id);
+    } catch (e) {
+      // Ignore
+    }
+
     return {
       ...request,
       primary_category: request.category?.parent?.name || request.category?.name || 'General',
       secondary_category: request.category?.parent ? request.category.name : 'N/A',
+      current_step: currentStep,
       fields,
       attachments,
       logs,
@@ -246,5 +280,44 @@ export class RequestService {
       where: { id },
       relations: { category: { parent: true }, requestor: { manager: true }, designated_manager: true },
     });
+  }
+
+  async updateRequest(
+    id: string,
+    data: {
+      justification?: string;
+      total_cost?: number;
+      currency?: string;
+      fulfillment_type?: string;
+      designated_manager_id?: string;
+      status?: 'Pending' | 'Approved' | 'In Progress' | 'Rejected' | 'SentBack' | 'Fulfilled' | 'Closed';
+    }
+  ): Promise<Request> {
+    const request = await this.requestRepository.findOne({
+      where: { id },
+      relations: { category: { parent: true } }
+    });
+    if (!request) throw new NotFoundException('Request not found');
+
+    const updateData: Partial<Request> = {};
+    if (data.justification !== undefined) updateData.justification = data.justification;
+    if (data.total_cost !== undefined) {
+      updateData.total_cost = data.fulfillment_type === 'Re-issue from Stock' ? 0 : data.total_cost;
+    }
+    if (data.currency !== undefined) updateData.currency = data.currency;
+    if (data.fulfillment_type !== undefined) updateData.fulfillment_type = data.fulfillment_type;
+    if (data.designated_manager_id !== undefined) {
+      updateData.designated_manager = { id: data.designated_manager_id } as any;
+    }
+    if (data.status !== undefined) {
+      updateData.status = data.status;
+    }
+
+    if (data.status === 'Pending') {
+      await this.approvalLogRepository.delete({ request: { id } });
+    }
+
+    await this.requestRepository.update(id, { ...updateData, updated_at: new Date() });
+    return this.requestRepository.findOne({ where: { id }, relations: { category: { parent: true } } });
   }
 }
