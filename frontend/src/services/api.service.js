@@ -1,6 +1,16 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+const getApiBaseUrl = () => {
+  const envUrl = process.env.REACT_APP_API_URL;
+  if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
+    return envUrl;
+  }
+  const hostname = window.location.hostname || 'localhost';
+  const protocol = window.location.protocol || 'http:';
+  return `${protocol}//${hostname}:3000`;
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -8,6 +18,20 @@ export const apiClient = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// Automatically attach the JWT token from localStorage to all outgoing requests
+apiClient.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
 
 export const authService = {
   async login(email, password) {
@@ -81,6 +105,10 @@ export const requestService = {
   },
   async closeRequest(id, data) {
     const response = await apiClient.put(`/requests/${id}/close`, data);
+    return response.data;
+  },
+  async updateRequest(id, data) {
+    const response = await apiClient.put(`/requests/${id}`, data);
     return response.data;
   },
   async getMyRequests(userId) {
