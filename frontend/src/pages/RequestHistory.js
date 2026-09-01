@@ -1,14 +1,29 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { requestService, adminConfigService } from '../services/api.service';
+import { requestService, adminConfigService, userService } from '../services/api.service';
 
 const RequestHistory = ({ authUser, title = "Request Histories & Audit Log" }) => {
   const [scope, setScope] = useState('all'); // 'all', 'submitted', 'actioned'
   const [requests, setRequests] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [managers, setManagers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [requestDetails, setRequestDetails] = useState(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
+
+  // Extra Info / Commenting & Edit Resubmit States
+  const [commentText, setCommentText] = useState('');
+  const [postingComment, setPostingComment] = useState(false);
+  const [commentStatus, setCommentStatus] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [editFormData, setEditFormData] = useState({
+    justification: '',
+    total_cost: 0,
+    currency: 'USD',
+    fulfillment_type: 'New Purchase',
+    designated_manager_id: '',
+  });
+  const [submittingEdit, setSubmittingEdit] = useState(false);
 
   // Filter States
   const [dateFilter, setDateFilter] = useState('all'); // 'all', 'today', '7days', '30days', 'custom'
@@ -24,11 +39,21 @@ const RequestHistory = ({ authUser, title = "Request Histories & Audit Log" }) =
     fetchInitialData();
   }, [authUser, scope]);
 
+  useEffect(() => {
+    setSelectedRequest(null);
+    setRequestDetails(null);
+  }, [scope, dateFilter, selectedCategory, selectedStatus, searchQuery]);
+
   const fetchInitialData = async () => {
     try {
       setLoading(true);
-      const catData = await adminConfigService.getCategories();
+      const [catData, userData] = await Promise.all([
+        adminConfigService.getCategories(),
+        userService.getUsers(),
+      ]);
       setCategories(catData);
+      const appUsers = userData.filter(u => u.role?.role_name === 'Approver' || u.role?.role_name === 'Super Admin' || u.role?.role_name === 'IT Agent');
+      setManagers(appUsers);
 
       let data = [];
       if (scope === 'submitted') {
@@ -60,10 +85,122 @@ const RequestHistory = ({ authUser, title = "Request Histories & Audit Log" }) =
     try {
       const details = await requestService.getRequestDetails(req.id);
       setRequestDetails(details);
+      setIsEditing(false); // Reset edit state when switching tickets
     } catch (err) {
       console.error('Error loading request details', err);
     } finally {
       setLoadingDetails(false);
+    }
+  };
+
+  const handlePostComment = async (e) => {
+    e.preventDefault();
+    if (!commentText.trim()) return;
+    setPostingComment(true);
+    setCommentStatus('');
+    try {
+      await requestService.addWorkUpdate(requestDetails.id, {
+        agentId: authUser?.id,
+        note: commentText,
+        status: requestDetails.status,
+      });
+      setCommentText('');
+      setCommentStatus('Comment posted successfully!');
+      
+      const details = await requestService.getRequestDetails(requestDetails.id);
+      setRequestDetails(details);
+      setTimeout(() => setCommentStatus(''), 3000);
+    } catch (err) {
+      setCommentStatus('Error posting comment: ' + err.message);
+    } finally {
+      setPostingComment(false);
+    }
+  };
+
+  const handleCloseRequest = async () => {
+    if (!window.confirm('Are you sure you want to close this request?')) return;
+    setPostingComment(true);
+    setCommentStatus('');
+    try {
+      await requestService.closeRequest(requestDetails.id, {
+        userId: authUser?.id,
+        notes: 'Request closed by the creator.',
+      });
+      setCommentStatus('Request closed successfully!');
+      
+      fetchInitialData();
+      const details = await requestService.getRequestDetails(requestDetails.id);
+      setRequestDetails(details);
+      setTimeout(() => setCommentStatus(''), 3000);
+    } catch (err) {
+      setCommentStatus('Error closing request: ' + err.message);
+    } finally {
+      setPostingComment(false);
+    }
+  };
+
+  const handleEditSubmit = async (e) => {
+    e.preventDefault();
+    setSubmittingEdit(true);
+    setCommentStatus('');
+    try {
+      await requestService.updateRequest(requestDetails.id, {
+        justification: editFormData.justification,
+        total_cost: editFormData.fulfillment_type === 'Re-issue from Stock' ? 0 : Number(editFormData.total_cost),
+        currency: editFormData.currency,
+        fulfillment_type: editFormData.fulfillment_type,
+        designated_manager_id: editFormData.designated_manager_id || null,
+        status: 'Pending',
+      });
+      setCommentStatus('Request resubmitted successfully!');
+      setIsEditing(false);
+      
+      fetchInitialData();
+      const details = await requestService.getRequestDetails(requestDetails.id);
+      setRequestDetails(details);
+      setTimeout(() => setCommentStatus(''), 3000);
+    } catch (err) {
+      setCommentStatus('Error resubmitting request: ' + err.message);
+    } finally {
+      setSubmittingEdit(false);
+    }
+  };
+
+  const startEditing = () => {
+    setEditFormData({
+      justification: requestDetails.justification || '',
+      total_cost: requestDetails.total_cost || 0,
+      currency: requestDetails.currency || 'USD',
+      fulfillment_type: requestDetails.fulfillment_type || 'New Purchase',
+      designated_manager_id: requestDetails.designated_manager?.id || '',
+    });
+    setIsEditing(true);
+  };
+
+  const handleSendClarification = async () => {
+    if (!commentText.trim()) {
+      alert('Please type your clarification/remark in the message box below first.');
+      return;
+    }
+    setPostingComment(true);
+    setCommentStatus('');
+    try {
+      await requestService.addWorkUpdate(requestDetails.id, {
+        agentId: authUser?.id,
+        note: `Clarification provided: ${commentText}`,
+        status: 'Pending',
+      });
+      setCommentText('');
+      setCommentStatus('Clarification response submitted successfully! Request is now back under review.');
+      
+      fetchInitialData();
+      const details = await requestService.getRequestDetails(requestDetails.id);
+      setRequestDetails(details);
+      setTimeout(() => setCommentStatus(''), 3000);
+    } catch (err) {
+      setCommentStatus('Error sending clarification: ' + err.message);
+    } finally {
+      setPostingComment(false);
     }
   };
 
@@ -436,6 +573,156 @@ const RequestHistory = ({ authUser, title = "Request Histories & Audit Log" }) =
                     <strong>Justification:</strong> {requestDetails?.justification}
                   </div>
                 </div>
+
+                {isEditing ? (
+                  <form onSubmit={handleEditSubmit} style={{ marginBottom: '1.25rem', padding: '1rem', backgroundColor: '#fdfaee', borderRadius: '8px', border: '1px solid #f59e0b' }}>
+                    <h4 style={{ margin: '0 0 0.5rem', fontSize: '0.85rem', fontWeight: '700', color: '#b45309' }}>Edit & Resubmit Request</h4>
+                    
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                      <label style={{ fontSize: '0.8rem', fontWeight: '600' }}>Line Manager</label>
+                      <select
+                        value={editFormData.designated_manager_id}
+                        onChange={(e) => setEditFormData({ ...editFormData, designated_manager_id: e.target.value })}
+                        style={{ padding: '0.4rem', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.85rem', backgroundColor: 'white' }}
+                      >
+                        <option value="">-- Select Approver Manager --</option>
+                        {managers.map(m => (
+                          <option key={m.id} value={m.id}>{m.full_name} ({m.department || m.role?.role_name})</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                      <label style={{ fontSize: '0.8rem', fontWeight: '600' }}>Fulfillment Source</label>
+                      <select
+                        value={editFormData.fulfillment_type}
+                        onChange={(e) => setEditFormData({ ...editFormData, fulfillment_type: e.target.value })}
+                        style={{ padding: '0.4rem', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.85rem', backgroundColor: 'white' }}
+                      >
+                        <option value="New Purchase">New Purchase</option>
+                        <option value="Re-issue from Stock">Re-issue from Stock</option>
+                      </select>
+                    </div>
+
+                    {editFormData.fulfillment_type !== 'Re-issue from Stock' && (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                        <div>
+                          <label style={{ fontSize: '0.8rem', fontWeight: '600' }}>Currency</label>
+                          <select
+                            value={editFormData.currency}
+                            onChange={(e) => setEditFormData({ ...editFormData, currency: e.target.value })}
+                            style={{ width: '100%', padding: '0.4rem', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.85rem', backgroundColor: 'white' }}
+                          >
+                            <option value="USD">USD ($)</option>
+                            <option value="EUR">EUR (€)</option>
+                            <option value="GBP">GBP (£)</option>
+                            <option value="INR">INR (₹)</option>
+                            <option value="AED">AED (AED)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '0.8rem', fontWeight: '600' }}>Estimated Cost</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={editFormData.total_cost}
+                            onChange={(e) => setEditFormData({ ...editFormData, total_cost: parseFloat(e.target.value) || 0 })}
+                            style={{ width: '100%', padding: '0.4rem', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                      <label style={{ fontSize: '0.8rem', fontWeight: '600' }}>Justification</label>
+                      <textarea
+                        value={editFormData.justification}
+                        onChange={(e) => setEditFormData({ ...editFormData, justification: e.target.value })}
+                        required
+                        rows={3}
+                        style={{ padding: '0.4rem', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button
+                        type="submit"
+                        disabled={submittingEdit}
+                        style={{ padding: '0.5rem 1rem', backgroundColor: '#16a34a', color: 'white', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer', fontSize: '0.85rem' }}
+                      >
+                        {submittingEdit ? 'Resubmitting...' : 'Resubmit Ticket'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsEditing(false)}
+                        style={{ padding: '0.5rem 1rem', backgroundColor: '#e2e8f0', color: '#475569', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer', fontSize: '0.85rem' }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <>
+                    {/* Action buttons (Close ticket, Edit request) */}
+                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem' }}>
+                      {requestDetails?.status === 'SentBack' && requestDetails.requestor?.id === authUser?.id && (
+                        <button
+                          onClick={startEditing}
+                          style={{ flex: 1, padding: '0.6rem', backgroundColor: '#f59e0b', color: 'white', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '0.85rem', cursor: 'pointer' }}
+                        >
+                          ↩ Edit & Resubmit
+                        </button>
+                      )}
+                      
+                      {requestDetails?.status === 'Fulfilled' && requestDetails.requestor?.id === authUser?.id && (
+                        <button
+                          onClick={handleCloseRequest}
+                          style={{ flex: 1, padding: '0.6rem', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '0.85rem', cursor: 'pointer' }}
+                        >
+                          🔒 Close Request & Confirm Resolution
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Comment Feed Input for requestor/agent */}
+                    <form onSubmit={handlePostComment} style={{ marginBottom: '1.25rem', padding: '1rem', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                      <h4 style={{ margin: '0 0 0.5rem', fontSize: '0.85rem', fontWeight: '700' }}>Provide Extra Information / Message</h4>
+                      <textarea
+                        value={commentText}
+                        onChange={(e) => setCommentText(e.target.value)}
+                        required
+                        placeholder="Add details, specify configuration requests, or reply to clarification requests..."
+                        rows={2}
+                        style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.8rem', marginBottom: '0.5rem' }}
+                      />
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <button
+                          type="submit"
+                          disabled={postingComment}
+                          style={{ flex: 1, padding: '0.5rem', backgroundColor: '#64748b', color: 'white', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '0.85rem', cursor: 'pointer' }}
+                        >
+                          {postingComment ? 'Posting...' : 'Post Message'}
+                        </button>
+                        {requestDetails?.status === 'SentBack' && requestDetails.requestor?.id === authUser?.id && (
+                          <button
+                            type="button"
+                            onClick={handleSendClarification}
+                            disabled={postingComment}
+                            style={{ flex: 2, padding: '0.5rem', backgroundColor: '#2563eb', color: 'white', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '0.85rem', cursor: 'pointer' }}
+                          >
+                            {postingComment ? 'Sending...' : '💬 Send back to Approver'}
+                          </button>
+                        )}
+                      </div>
+                    </form>
+                  </>
+                )}
+
+                {commentStatus && (
+                  <div style={{ padding: '0.75rem', borderRadius: '6px', backgroundColor: commentStatus.includes('Error') ? '#fee2e2' : '#e0f2fe', color: commentStatus.includes('Error') ? '#b91c1c' : '#0369a1', fontSize: '0.85rem', marginBottom: '1rem' }}>
+                    {commentStatus}
+                  </div>
+                )}
 
                 <h4 style={{ margin: '0 0 0.75rem', fontSize: '0.85rem', color: '#475569', textTransform: 'uppercase' }}>Historical Audit Trail</h4>
 
