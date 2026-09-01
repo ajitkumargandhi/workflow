@@ -23,6 +23,7 @@ import { UserController, RoleController } from './controllers/user-role.controll
 import { RequestController } from './controllers/request.controller';
 import { AdminConfigController } from './controllers/admin-config.controller';
 import { AuthController } from './controllers/auth.controller';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 @Module({
   imports: [
@@ -55,6 +56,6 @@ import { AuthController } from './controllers/auth.controller';
     TypeOrmModule.forFeature([Role, User, Category, Request, RequestField, RequestAttachment, RequestUpdate, WorkflowStep, ApprovalLog, AuditLog]),
   ],
   controllers: [UserController, RoleController, RequestController, AdminConfigController, AuthController],
-  providers: [UserService, RoleService, RequestService, WorkflowService, NotificationService, AdminConfigService, AuditService, AuthService],
+  providers: [UserService, RoleService, RequestService, WorkflowService, NotificationService, AdminConfigService, AuditService, AuthService, JwtAuthGuard],
 })
 export class AppModule {}
