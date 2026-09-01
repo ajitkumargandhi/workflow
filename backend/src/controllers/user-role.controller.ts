@@ -1,11 +1,13 @@
-import { Controller, Get, Post, Body, Param, Put, Delete, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Put, Delete, UploadedFile, UseInterceptors, UseGuards } from '@nestjs/common';
 import { UserService } from '../services/user.service';
 import { RoleService } from '../services/role.service';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { User } from '../entities/user.entity';
 import { Role } from '../entities/role.entity';
+import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 
 @Controller('users')
+@UseGuards(JwtAuthGuard)
 export class UserController {
   constructor(
     private readonly userService: UserService,
@@ -59,6 +61,7 @@ export class UserController {
 }
 
 @Controller('roles')
+@UseGuards(JwtAuthGuard)
 export class RoleController {
   constructor(private readonly roleService: RoleService) {}
 
