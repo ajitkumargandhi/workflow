@@ -1,9 +1,11 @@
-import { Controller, Get, Post, Body, Param, Put, Delete } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Put, Delete, UseGuards } from '@nestjs/common';
 import { AdminConfigService } from '../services/admin-config.service';
 import { Category } from '../entities/category.entity';
 import { WorkflowStep } from '../entities/workflow-step.entity';
+import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 
 @Controller('admin/config')
+@UseGuards(JwtAuthGuard)
 export class AdminConfigController {
   constructor(private readonly adminConfigService: AdminConfigService) {}
 
