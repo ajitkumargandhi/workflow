@@ -23,7 +23,8 @@ const Login = () => {
   const tabAccounts = {
     requestor: { email: 'employee@company.com', role: 'Requestor', title: 'Requestor Portal', desc: 'Submit and track service or asset requests' },
     manager: { email: 'manager@company.com', role: 'Approver', title: 'Manager Portal', desc: 'Review, approve, or reject team workflow requests' },
-    support: { email: 'support@company.com', role: 'IT Support Agent', title: 'IT & Admin Support Portal', desc: 'Fulfill approved requests and record work updates' },
+    support: { email: 'support@company.com', role: 'IT Support Agent', title: 'IT Support Portal', desc: 'Fulfill approved IT requests and record work updates' },
+    officeAdmin: { email: 'office_admin@company.com', role: 'Admin Agent', title: 'Office Admin Portal', desc: 'Fulfill approved Office Admin requests and record work updates' },
     admin: { email: 'admin@company.com', role: 'Super Admin', title: 'Admin & System Config', desc: 'Manage users, category workflows, and AD/SMTP settings' },
   };
 
@@ -46,9 +47,9 @@ const Login = () => {
       setCurrentUser(data.user);
 
       if (data.user.role === 'Super Admin') navigate('/admin');
-      else if (data.user.role === 'Approver') navigate('/approver');
+      else if (data.user.role === 'Approver') navigate('/approvals');
       else if (data.user.role === 'IT Agent' || data.user.role === 'Admin Agent') navigate('/support');
-      else navigate('/requestor');
+      else navigate('/');
     } catch (err) {
       setError(err.response?.data?.message || 'Login failed. Please check your credentials.');
     } finally {
@@ -132,7 +133,7 @@ const Login = () => {
         {/* Portal Tabs */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
+          gridTemplateColumns: 'repeat(5, 1fr)',
           gap: '4px',
           backgroundColor: '#f1f5f9',
           padding: '4px',
@@ -157,7 +158,7 @@ const Login = () => {
                 transition: 'all 0.15s ease'
               }}
             >
-              {tabKey === 'requestor' ? '👤 Employee' : tabKey === 'manager' ? '👔 Manager' : tabKey === 'support' ? '🛠️ Support' : '⚙️ Admin'}
+              {tabKey === 'requestor' ? '👤 Employee' : tabKey === 'manager' ? '👔 Manager' : tabKey === 'support' ? '💻 IT' : tabKey === 'officeAdmin' ? '🏢 Office' : '⚙️ Admin'}
             </button>
           ))}
         </div>
