@@ -6,6 +6,7 @@ import { WorkflowStep } from '../entities/workflow-step.entity';
 import { ApprovalLog } from '../entities/approval-log.entity';
 import { User } from '../entities/user.entity';
 import { Role } from '../entities/role.entity';
+import { NotificationService } from './notification.service';
 
 @Injectable()
 export class WorkflowService {
@@ -18,6 +19,7 @@ export class WorkflowService {
     private approvalLogRepository: Repository<ApprovalLog>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    private notificationService: NotificationService,
   ) {}
 
   async getStepsForRequest(request: Request): Promise<WorkflowStep[]> {
@@ -146,6 +148,23 @@ export class WorkflowService {
       }
 
       await this.requestRepository.update(requestId, { status: newStatus, updated_at: new Date() });
+
+      // Dispatch email notification to requestor
+      try {
+        if (request.requestor) {
+          const fullRequestor = await this.userRepository.findOne({ where: { id: request.requestor.id } });
+          if (fullRequestor) {
+            await this.notificationService.notifyRequestorOfStatusChange(
+              fullRequestor,
+              request,
+              newStatus,
+              comments || `Action: ${action} by ${approver.full_name}`
+            );
+          }
+        }
+      } catch (notifErr) {
+        console.warn('Error sending workflow action notification email:', notifErr.message);
+      }
       
       return this.requestRepository.findOne({
         where: { id: requestId },
