@@ -10,6 +10,7 @@ import SupportDashboard from './pages/SupportDashboard';
 import ServerConfig from './pages/ServerConfig';
 import RequestHistory from './pages/RequestHistory';
 import Login from './pages/Login';
+import ResetPassword from './pages/ResetPassword';
 
 function AppContent() {
   const { currentUser, logout } = useUser();
@@ -110,6 +111,7 @@ function AppContent() {
         <main style={{ flex: 1, padding: '2rem' }}>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route
               path="/"
               element={currentUser ? <RequestForm /> : <Navigate to="/login" />}
