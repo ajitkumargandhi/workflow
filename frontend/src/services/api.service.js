@@ -5,9 +5,15 @@ const getApiBaseUrl = () => {
   if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
     return envUrl;
   }
-  const hostname = window.location.hostname || 'localhost';
-  const protocol = window.location.protocol || 'http:';
-  return `${protocol}//${hostname}:3000`;
+  if (typeof window !== 'undefined' && window.location) {
+    if (window.location.port === '80' || window.location.port === '443' || window.location.port === '') {
+      return window.location.origin;
+    }
+    const hostname = window.location.hostname || 'localhost';
+    const protocol = window.location.protocol || 'http:';
+    return `${protocol}//${hostname}:3010`;
+  }
+  return 'http://localhost:3010';
 };
 
 const API_BASE_URL = getApiBaseUrl();
@@ -38,8 +44,9 @@ export const authService = {
     const response = await apiClient.post('/auth/login', { email, password });
     return response.data;
   },
-  async forgotPassword(email) {
-    const response = await apiClient.post('/auth/forgot-password', { email });
+  async forgotPassword(email, frontendUrl) {
+    const origin = frontendUrl || (typeof window !== 'undefined' ? window.location.origin : undefined);
+    const response = await apiClient.post('/auth/forgot-password', { email, frontendUrl: origin });
     return response.data;
   },
   async resetPasswordToken(token, newPassword) {
@@ -49,8 +56,9 @@ export const authService = {
 };
 
 export const userService = {
-  async getUsers() {
-    const response = await apiClient.get('/users');
+  async getUsers(params) {
+  
+    const response = await apiClient.get('/users', { params });
     return response.data;
   },
   async getUser(id) {
@@ -168,6 +176,14 @@ export const adminConfigService = {
   },
   async syncLdapUsers() {
     const response = await apiClient.post('/admin/config/sync-ldap');
+    return response.data;
+  },
+  async testLdap() {
+    const response = await apiClient.post('/admin/config/test-ldap');
+    return response.data;
+  },
+  async testSmtp(testEmail) {
+    const response = await apiClient.post('/admin/config/test-smtp', { testEmail });
     return response.data;
   },
   async exportDatabaseBackup() {
