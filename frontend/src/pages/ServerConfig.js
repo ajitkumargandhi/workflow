@@ -26,6 +26,13 @@ const ServerConfig = () => {
   const [restoreFileContent, setRestoreFileContent] = useState('');
   const [selectedFileName, setSelectedFileName] = useState('');
 
+  // Diagnostic Test States
+  const [ldapTestStatus, setLdapTestStatus] = useState('');
+  const [testingLdap, setTestingLdap] = useState(false);
+  const [smtpTestStatus, setSmtpTestStatus] = useState('');
+  const [testingSmtp, setTestingSmtp] = useState(false);
+  const [testEmail, setTestEmail] = useState('admin@company.com');
+
   useEffect(() => {
     fetchConfig();
   }, []);
@@ -33,7 +40,10 @@ const ServerConfig = () => {
   const fetchConfig = async () => {
     try {
       const data = await adminConfigService.getServerConfig();
-      if (data) setConfig(prev => ({ ...prev, ...data }));
+      if (data) {
+        setConfig(prev => ({ ...prev, ...data }));
+        if (data.smtpUser) setTestEmail(data.smtpUser);
+      }
     } catch (err) {
       console.error('Error fetching server config', err);
     }
@@ -43,10 +53,27 @@ const ServerConfig = () => {
     e.preventDefault();
     try {
       await adminConfigService.saveServerConfig(config);
-      setStatus('Server configuration saved successfully!');
-      setTimeout(() => setStatus(''), 3000);
+      setStatus('Server configuration saved and persisted successfully to database!');
+      setTimeout(() => setStatus(''), 4000);
     } catch (err) {
       setStatus('Error saving server configuration: ' + err.message);
+    }
+  };
+
+  const handleTestLdap = async () => {
+    setTestingLdap(true);
+    setLdapTestStatus('Testing Active Directory / LDAP connection & credentials...');
+    try {
+      // First save current values so test runs against latest settings
+      await adminConfigService.saveServerConfig(config);
+      const res = await adminConfigService.testLdap();
+      setLdapTestStatus(res.message);
+      setTimeout(() => setLdapTestStatus(''), 8000);
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message;
+      setLdapTestStatus('LDAP Test Failed: ' + msg);
+    } finally {
+      setTestingLdap(false);
     }
   };
 
@@ -54,13 +81,32 @@ const ServerConfig = () => {
     setSyncing(true);
     setSyncStatus('Initiating Active Directory / LDAP synchronization...');
     try {
+      await adminConfigService.saveServerConfig(config);
       const res = await adminConfigService.syncLdapUsers();
       setSyncStatus(res.message);
-      setTimeout(() => setSyncStatus(''), 5000);
+      setTimeout(() => setSyncStatus(''), 8000);
     } catch (err) {
-      setSyncStatus('Error syncing AD users: ' + err.message);
+      const msg = err.response?.data?.message || err.message;
+      setSyncStatus('Error syncing AD users: ' + msg);
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleTestSmtp = async () => {
+    setTestingSmtp(true);
+    setSmtpTestStatus('Verifying SMTP handshake & sending verification email...');
+    try {
+      // First save current values so test runs against latest settings
+      await adminConfigService.saveServerConfig(config);
+      const res = await adminConfigService.testSmtp(testEmail);
+      setSmtpTestStatus(res.message);
+      setTimeout(() => setSmtpTestStatus(''), 8000);
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message;
+      setSmtpTestStatus('SMTP Test Failed: ' + msg);
+    } finally {
+      setTestingSmtp(false);
     }
   };
 
@@ -138,8 +184,8 @@ const ServerConfig = () => {
         <div style={{
           padding: '1rem',
           borderRadius: '8px',
-          backgroundColor: status.includes('Error') ? '#fee2e2' : '#dcfce7',
-          color: status.includes('Error') ? '#b91c1c' : '#15803d',
+          backgroundColor: status.toLowerCase().includes('error') || status.toLowerCase().includes('failed') ? '#fee2e2' : '#dcfce7',
+          color: status.toLowerCase().includes('error') || status.toLowerCase().includes('failed') ? '#b91c1c' : '#15803d',
           fontWeight: '600',
           marginBottom: '1.5rem'
         }}>
@@ -151,8 +197,8 @@ const ServerConfig = () => {
         <div style={{
           padding: '1rem',
           borderRadius: '8px',
-          backgroundColor: syncStatus.includes('Error') ? '#fee2e2' : '#e0f2fe',
-          color: syncStatus.includes('Error') ? '#b91c1c' : '#0369a1',
+          backgroundColor: syncStatus.toLowerCase().includes('error') || syncStatus.toLowerCase().includes('failed') ? '#fee2e2' : '#e0f2fe',
+          color: syncStatus.toLowerCase().includes('error') || syncStatus.toLowerCase().includes('failed') ? '#b91c1c' : '#0369a1',
           fontWeight: '600',
           marginBottom: '1.5rem'
         }}>
@@ -164,8 +210,8 @@ const ServerConfig = () => {
         <div style={{
           padding: '1rem',
           borderRadius: '8px',
-          backgroundColor: backupStatus.includes('failed') || backupStatus.includes('Error') ? '#fee2e2' : '#dcfce7',
-          color: backupStatus.includes('failed') || backupStatus.includes('Error') ? '#b91c1c' : '#15803d',
+          backgroundColor: backupStatus.toLowerCase().includes('failed') || backupStatus.toLowerCase().includes('error') ? '#fee2e2' : '#dcfce7',
+          color: backupStatus.toLowerCase().includes('failed') || backupStatus.toLowerCase().includes('error') ? '#b91c1c' : '#15803d',
           fontWeight: '600',
           marginBottom: '1.5rem'
         }}>
@@ -351,29 +397,62 @@ const ServerConfig = () => {
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={handleSyncLdap}
-            disabled={!config.ldapEnabled || syncing}
-            style={{
-              padding: '0.6rem 1.2rem',
-              backgroundColor: '#0284c7',
-              color: 'white',
-              border: 'none',
+          {ldapTestStatus && (
+            <div style={{
+              padding: '0.75rem 1rem',
               borderRadius: '6px',
+              backgroundColor: ldapTestStatus.toLowerCase().includes('failed') || ldapTestStatus.toLowerCase().includes('error') ? '#fee2e2' : '#e0f2fe',
+              color: ldapTestStatus.toLowerCase().includes('failed') || ldapTestStatus.toLowerCase().includes('error') ? '#b91c1c' : '#0369a1',
+              fontSize: '0.85rem',
               fontWeight: '600',
-              cursor: (!config.ldapEnabled || syncing) ? 'not-allowed' : 'pointer'
-            }}
-          >
-            {syncing ? 'Synchronizing AD Users...' : '🔄 Sync Users from Active Directory Now'}
-          </button>
+              marginBottom: '1rem'
+            }}>
+              {ldapTestStatus}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={handleTestLdap}
+              disabled={!config.ldapEnabled || testingLdap}
+              style={{
+                padding: '0.6rem 1.2rem',
+                backgroundColor: '#475569',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                fontWeight: '600',
+                cursor: (!config.ldapEnabled || testingLdap) ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {testingLdap ? 'Testing LDAP...' : '🔍 Test LDAP Connection'}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSyncLdap}
+              disabled={!config.ldapEnabled || syncing}
+              style={{
+                padding: '0.6rem 1.2rem',
+                backgroundColor: '#0284c7',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                fontWeight: '600',
+                cursor: (!config.ldapEnabled || syncing) ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {syncing ? 'Synchronizing AD Users...' : '🔄 Sync Users from Active Directory Now'}
+            </button>
+          </div>
         </div>
 
         {/* Email SMTP Settings */}
         <div style={{ backgroundColor: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '1.5rem', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
           <h3 style={{ margin: '0 0 1rem', fontSize: '1.1rem', fontWeight: '700', color: '#0f172a' }}>📧 Email Notification (SMTP) Configuration</h3>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
               <label style={{ fontSize: '0.85rem', fontWeight: '600' }}>SMTP Server Host</label>
               <input
@@ -426,6 +505,52 @@ const ServerConfig = () => {
                 <option value="None">None (Unencrypted on port 25)</option>
               </select>
             </div>
+          </div>
+
+          {smtpTestStatus && (
+            <div style={{
+              padding: '0.75rem 1rem',
+              borderRadius: '6px',
+              backgroundColor: smtpTestStatus.toLowerCase().includes('failed') || smtpTestStatus.toLowerCase().includes('error') ? '#fee2e2' : '#dcfce7',
+              color: smtpTestStatus.toLowerCase().includes('failed') || smtpTestStatus.toLowerCase().includes('error') ? '#b91c1c' : '#15803d',
+              fontSize: '0.85rem',
+              fontWeight: '600',
+              marginBottom: '1rem'
+            }}>
+              {smtpTestStatus}
+            </div>
+          )}
+
+          {/* Test SMTP Dispatch Controls */}
+          <div style={{ backgroundColor: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: '220px' }}>
+              <label style={{ fontSize: '0.75rem', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '0.25rem' }}>Send Test Email To:</label>
+              <input
+                type="email"
+                placeholder="recipient@company.com"
+                value={testEmail}
+                onChange={(e) => setTestEmail(e.target.value)}
+                style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleTestSmtp}
+              disabled={testingSmtp}
+              style={{
+                marginTop: '1.25rem',
+                padding: '0.6rem 1.2rem',
+                backgroundColor: '#10b981',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                fontWeight: '600',
+                fontSize: '0.85rem',
+                cursor: testingSmtp ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {testingSmtp ? 'Testing SMTP...' : '🧪 Test SMTP Connection & Send Test Email'}
+            </button>
           </div>
         </div>
 
