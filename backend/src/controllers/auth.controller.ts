@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, Req } from '@nestjs/common';
 import { AuthService } from '../services/auth.service';
 
 @Controller('auth')
@@ -13,8 +13,9 @@ export class AuthController {
 
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
-  async forgotPassword(@Body('email') email: string) {
-    return this.authService.forgotPassword(email);
+  async forgotPassword(@Body() body: { email: string; frontendUrl?: string }, @Req() req: any) {
+    const origin = body.frontendUrl || req.headers.origin || req.headers.referer || (req.protocol + '://' + req.get('host'));
+    return this.authService.forgotPassword(body.email, origin);
   }
 
   @Post('reset-password')
