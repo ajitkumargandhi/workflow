@@ -106,10 +106,10 @@ const RequestHistory = ({ authUser, title = "Request Histories & Audit Log" }) =
       });
       setCommentText('');
       setCommentStatus('Comment posted successfully!');
-      
-      const details = await requestService.getRequestDetails(requestDetails.id);
-      setRequestDetails(details);
-      setTimeout(() => setCommentStatus(''), 3000);
+      setSelectedRequest(null);
+      setRequestDetails(null);
+      fetchInitialData();
+      setTimeout(() => setCommentStatus(''), 4000);
     } catch (err) {
       setCommentStatus('Error posting comment: ' + err.message);
     } finally {
@@ -127,11 +127,10 @@ const RequestHistory = ({ authUser, title = "Request Histories & Audit Log" }) =
         notes: 'Request closed by the creator.',
       });
       setCommentStatus('Request closed successfully!');
-      
+      setSelectedRequest(null);
+      setRequestDetails(null);
       fetchInitialData();
-      const details = await requestService.getRequestDetails(requestDetails.id);
-      setRequestDetails(details);
-      setTimeout(() => setCommentStatus(''), 3000);
+      setTimeout(() => setCommentStatus(''), 4000);
     } catch (err) {
       setCommentStatus('Error closing request: ' + err.message);
     } finally {
@@ -154,11 +153,10 @@ const RequestHistory = ({ authUser, title = "Request Histories & Audit Log" }) =
       });
       setCommentStatus('Request resubmitted successfully!');
       setIsEditing(false);
-      
+      setSelectedRequest(null);
+      setRequestDetails(null);
       fetchInitialData();
-      const details = await requestService.getRequestDetails(requestDetails.id);
-      setRequestDetails(details);
-      setTimeout(() => setCommentStatus(''), 3000);
+      setTimeout(() => setCommentStatus(''), 4000);
     } catch (err) {
       setCommentStatus('Error resubmitting request: ' + err.message);
     } finally {
@@ -192,11 +190,10 @@ const RequestHistory = ({ authUser, title = "Request Histories & Audit Log" }) =
       });
       setCommentText('');
       setCommentStatus('Clarification response submitted successfully! Request is now back under review.');
-      
+      setSelectedRequest(null);
+      setRequestDetails(null);
       fetchInitialData();
-      const details = await requestService.getRequestDetails(requestDetails.id);
-      setRequestDetails(details);
-      setTimeout(() => setCommentStatus(''), 3000);
+      setTimeout(() => setCommentStatus(''), 4000);
     } catch (err) {
       setCommentStatus('Error sending clarification: ' + err.message);
     } finally {
@@ -341,6 +338,30 @@ const RequestHistory = ({ authUser, title = "Request Histories & Audit Log" }) =
           </button>
         </div>
       </div>
+
+      {commentStatus && (
+        <div style={{
+          padding: '0.875rem 1.25rem',
+          borderRadius: '8px',
+          backgroundColor: commentStatus.includes('Error') ? '#fee2e2' : '#dcfce7',
+          color: commentStatus.includes('Error') ? '#b91c1c' : '#15803d',
+          fontWeight: '600',
+          fontSize: '0.875rem',
+          marginBottom: '1.25rem',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          boxShadow: '0 2px 4px rgba(0, 0, 0, 0.04)'
+        }}>
+          <span>{commentStatus.includes('Error') ? '✕ ' : '✓ '}{commentStatus}</span>
+          <button
+            onClick={() => setCommentStatus('')}
+            style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '1rem', color: 'inherit', fontWeight: 'bold' }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Filter Toolbar */}
       <div style={{
