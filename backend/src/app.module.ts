@@ -11,6 +11,7 @@ import { RequestUpdate } from './entities/request-update.entity';
 import { WorkflowStep } from './entities/workflow-step.entity';
 import { ApprovalLog } from './entities/approval-log.entity';
 import { AuditLog } from './entities/audit-log.entity';
+import { ServerConfig } from './entities/server-config.entity';
 import { UserService } from './services/user.service';
 import { RoleService } from './services/role.service';
 import { RequestService } from './services/request.service';
@@ -45,6 +46,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
         WorkflowStep,
         ApprovalLog,
         AuditLog,
+        ServerConfig,
       ],
       autoLoadEntities: true,
       synchronize: false,
@@ -53,7 +55,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
       secret: process.env.JWT_SECRET || 'ENTERPRISE_WORKFLOW_JWT_SECRET_KEY_PROD_2026',
       signOptions: { expiresIn: '1d' },
     }),
-    TypeOrmModule.forFeature([Role, User, Category, Request, RequestField, RequestAttachment, RequestUpdate, WorkflowStep, ApprovalLog, AuditLog]),
+    TypeOrmModule.forFeature([Role, User, Category, Request, RequestField, RequestAttachment, RequestUpdate, WorkflowStep, ApprovalLog, AuditLog, ServerConfig]),
   ],
   controllers: [UserController, RoleController, RequestController, AdminConfigController, AuthController],
   providers: [UserService, RoleService, RequestService, WorkflowService, NotificationService, AdminConfigService, AuditService, AuthService, JwtAuthGuard],
