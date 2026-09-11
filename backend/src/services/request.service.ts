@@ -9,6 +9,7 @@ import { ApprovalLog } from '../entities/approval-log.entity';
 import { User } from '../entities/user.entity';
 import { Category } from '../entities/category.entity';
 import { WorkflowService } from './workflow.service';
+import { NotificationService } from './notification.service';
 
 @Injectable()
 export class RequestService {
@@ -28,6 +29,7 @@ export class RequestService {
     @InjectRepository(Category)
     private categoryRepository: Repository<Category>,
     private workflowService: WorkflowService,
+    private notificationService: NotificationService,
   ) {}
 
   private async enrichRequest(req: Request): Promise<any> {
@@ -109,6 +111,32 @@ export class RequestService {
         })
       );
       await this.requestAttachmentRepository.save(attachmentEntities);
+    }
+
+    // Dispatch email notifications via NotificationService
+    try {
+      if (savedRequest.requestor?.id) {
+        const fullRequestor = await this.userRepository.findOne({ where: { id: savedRequest.requestor.id } });
+        if (fullRequestor) {
+          await this.notificationService.notifyRequestorOfSubmission(fullRequestor, {
+            ...savedRequest,
+            category,
+          });
+        }
+      }
+      if (savedRequest.designated_manager?.id) {
+        const fullManager = await this.userRepository.findOne({ where: { id: savedRequest.designated_manager.id } });
+        if (fullManager && savedRequest.requestor?.id) {
+          const fullRequestor = await this.userRepository.findOne({ where: { id: savedRequest.requestor.id } });
+          await this.notificationService.notifyApproverOfPendingAction(fullManager, {
+            ...savedRequest,
+            requestor: fullRequestor,
+            category,
+          });
+        }
+      }
+    } catch (notifErr) {
+      console.warn('Notification dispatch error on ticket creation:', notifErr.message);
     }
 
     return savedRequest;
@@ -255,6 +283,22 @@ export class RequestService {
 
     if (agentId) {
       await this.addWorkUpdate(id, agentId, `Fulfilled request: ${notes}`, 'Fulfilled');
+    }
+
+    try {
+      if (request.requestor) {
+        const fullRequestor = await this.userRepository.findOne({ where: { id: request.requestor.id } });
+        if (fullRequestor) {
+          await this.notificationService.notifyRequestorOfStatusChange(
+            fullRequestor,
+            request,
+            'Fulfilled',
+            `Your request has been fulfilled by support. Notes: ${notes}`
+          );
+        }
+      }
+    } catch (notifErr) {
+      console.warn('Error sending fulfillment notification email:', notifErr.message);
     }
 
     return this.requestRepository.findOne({
