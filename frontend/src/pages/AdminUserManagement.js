@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { userService, roleService } from '../services/api.service';
 
 const AdminUserManagement = () => {
@@ -7,6 +7,15 @@ const AdminUserManagement = () => {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState('');
 
+  // Filter State
+  const [filters, setFilters] = useState({
+    search: '',
+    department: '',
+    role: '',
+    auth_source: '',
+    is_active: '',
+  });
+  const searchTimeout = useRef(null);
   // Add/Edit User Form State
   const [showForm, setShowForm] = useState(false);
   const [editingUserId, setEditingUserId] = useState(null);
@@ -32,11 +41,19 @@ const AdminUserManagement = () => {
     fetchUsersAndRoles();
   }, []);
 
-  const fetchUsersAndRoles = async () => {
+  const fetchUsersAndRoles = async (overrideFilters) => {
+    const f = overrideFilters || filters;
     try {
       setLoading(true);
+      const params = {};
+      if (f.search) params.search = f.search;
+      if (f.department) params.department = f.department;
+      if (f.role) params.role = f.role;
+      if (f.auth_source) params.auth_source = f.auth_source;
+      if (f.is_active) params.is_active = f.is_active;
+
       const [uData, rData] = await Promise.all([
-        userService.getUsers(),
+        userService.getUsers(params),
         roleService.getRoles()
       ]);
       setUsers(uData);
@@ -133,6 +150,18 @@ const AdminUserManagement = () => {
     } catch (err) {
       setStatus('Error importing CSV: ' + err.message);
     }
+  };
+
+  const applyFilter = (key, value) => {
+    const newFilters = { ...filters, [key]: value };
+    setFilters(newFilters);
+    fetchUsersAndRoles(newFilters);
+  };
+
+  const clearFilters = () => {
+    const cleared = { search: '', department: '', role: '', auth_source: '', is_active: '' };
+    setFilters(cleared);
+    fetchUsersAndRoles(cleared);
   };
 
   return (
@@ -339,6 +368,68 @@ const AdminUserManagement = () => {
         </form>
       )}
 
+      {/* Filter Bar */}
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '1rem', flexWrap: 'wrap', alignItems: 'center', backgroundColor: 'white', padding: '1rem', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+        <input
+          placeholder="Search name or email..."
+          value={filters.search}
+          onChange={e => {
+            const val = e.target.value;
+            setFilters(f => ({ ...f, search: val }));
+            if (searchTimeout.current) clearTimeout(searchTimeout.current);
+            searchTimeout.current = setTimeout(() => {
+              const newFilters = { ...filters, search: val };
+              fetchUsersAndRoles(newFilters);
+            }, 400);
+         }}
+         style={{ padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', width: '200px' }}
+/>   
+        <select
+          value={filters.department}
+          onChange={e => applyFilter('department', e.target.value)}
+          style={{ padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '6px' }}
+        >
+          <option value="">All Departments</option>
+          {Array.from(new Set(users.map(u => u.department).filter(Boolean))).map(d => (
+            <option key={d} value={d}>{d}</option>
+          ))}
+        </select>
+        <select
+          value={filters.role}
+          onChange={e => applyFilter('role', e.target.value)}
+          style={{ padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '6px' }}
+        >
+          <option value="">All Roles</option>
+          {roles.map(r => (
+            <option key={r.id} value={r.role_name}>{r.role_name}</option>
+          ))}
+        </select>
+        <select
+          value={filters.auth_source}
+          onChange={e => applyFilter('auth_source', e.target.value)}
+          style={{ padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '6px' }}
+        >
+          <option value="">All Sources</option>
+          <option value="AD">AD</option>
+          <option value="Local">Local</option>
+        </select>
+        <select
+          value={filters.is_active}
+          onChange={e => applyFilter('is_active', e.target.value)}
+          style={{ padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '6px' }}
+        >
+          <option value="">All Status</option>
+          <option value="true">Active</option>
+          <option value="false">Inactive</option>
+        </select>
+        <button
+          onClick={clearFilters}
+          style={{ padding: '8px 16px', backgroundColor: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', fontWeight: '600' }}
+        >
+          ✕ Clear
+        </button>
+      </div>
+
       {/* Users List Table */}
       <div style={{ backgroundColor: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
         {loading ? (
@@ -440,4 +531,4 @@ const AdminUserManagement = () => {
   );
 };
 
-export default AdminUserManagement;
+export default AdminUserManagement;   
