@@ -4,26 +4,13 @@ import { Repository } from 'typeorm';
 import { Category } from '../entities/category.entity';
 import { WorkflowStep } from '../entities/workflow-step.entity';
 import { User } from '../entities/user.entity';
+import { ServerConfig } from '../entities/server-config.entity';
+import { Client } from 'ldapts';
 import * as bcrypt from 'bcrypt';
+import { resolveRoleFromAdGroupsAndTitle, getLdapString, getLdapStringArray, extractDomainFromDn } from '../utils/ad-role-mapper';
 
 @Injectable()
 export class AdminConfigService {
-  private serverConfigState = {
-    systemName: 'Enterprise Workflow Engine',
-    sessionTimeout: 60,
-    maintenanceMode: false,
-    ldapEnabled: true,
-    ldapUrl: 'ldap://ad.company.local:389',
-    ldapBaseDn: 'DC=company,DC=local',
-    ldapBindDn: 'CN=Admin,DC=company,DC=local',
-    ldapBindPassword: 'SecretPassword123',
-    smtpHost: 'smtp.company.com',
-    smtpPort: 587,
-    smtpUser: 'notifications@company.com',
-    smtpPassword: 'SmtpSecretPassword123',
-    smtpProtocol: 'STARTTLS',
-  };
-
   constructor(
     @InjectRepository(Category)
     private categoryRepository: Repository<Category>,
@@ -31,6 +18,8 @@ export class AdminConfigService {
     private workflowStepRepository: Repository<WorkflowStep>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(ServerConfig)
+    private serverConfigRepository: Repository<ServerConfig>,
   ) {}
 
   // Category Management
@@ -80,47 +69,311 @@ export class AdminConfigService {
 
   // Server & AD Configuration
   async getServerConfig() {
-    return this.serverConfigState;
+    let config = await this.serverConfigRepository.findOne({ where: { id: 1 } });
+    if (!config) {
+      config = this.serverConfigRepository.create({ id: 1 });
+      await this.serverConfigRepository.save(config);
+    }
+    return {
+      systemName: config.system_name,
+      sessionTimeout: config.session_timeout,
+      maintenanceMode: config.maintenance_mode,
+      ldapEnabled: config.ldap_enabled,
+      ldapUrl: config.ldap_url,
+      ldapBaseDn: config.ldap_base_dn,
+      ldapBindDn: config.ldap_bind_dn,
+      ldapBindPassword: config.ldap_bind_password ? '••••••••' : '',
+      smtpHost: config.smtp_host,
+      smtpPort: config.smtp_port,
+      smtpUser: config.smtp_user,
+      smtpPassword: config.smtp_password ? '••••••••' : '',
+      smtpProtocol: config.smtp_protocol,
+    };
   }
 
   async updateServerConfig(data: any) {
-    this.serverConfigState = { ...this.serverConfigState, ...data };
-    return this.serverConfigState;
+    let config = await this.serverConfigRepository.findOne({ where: { id: 1 } });
+    if (!config) {
+      config = this.serverConfigRepository.create({ id: 1 });
+    }
+
+    if (data.systemName !== undefined) config.system_name = data.systemName;
+    if (data.sessionTimeout !== undefined) config.session_timeout = Number(data.sessionTimeout);
+    if (data.maintenanceMode !== undefined) config.maintenance_mode = Boolean(data.maintenanceMode);
+    if (data.ldapEnabled !== undefined) config.ldap_enabled = Boolean(data.ldapEnabled);
+    if (data.ldapUrl !== undefined) config.ldap_url = data.ldapUrl;
+    if (data.ldapBaseDn !== undefined) config.ldap_base_dn = data.ldapBaseDn;
+    if (data.ldapBindDn !== undefined) config.ldap_bind_dn = data.ldapBindDn;
+    if (data.ldapBindPassword !== undefined && data.ldapBindPassword !== '' && data.ldapBindPassword !== '••••••••') {
+      config.ldap_bind_password = data.ldapBindPassword;
+    }
+    if (data.smtpHost !== undefined) config.smtp_host = data.smtpHost;
+    if (data.smtpPort !== undefined) config.smtp_port = Number(data.smtpPort);
+    if (data.smtpUser !== undefined) config.smtp_user = data.smtpUser;
+    if (data.smtpPassword !== undefined && data.smtpPassword !== '' && data.smtpPassword !== '••••••••') {
+      config.smtp_password = data.smtpPassword;
+    }
+    if (data.smtpProtocol !== undefined) config.smtp_protocol = data.smtpProtocol;
+
+    await this.serverConfigRepository.save(config);
+    return this.getServerConfig();
+  }
+
+  // Active Directory / LDAP Connection Test
+  async testLdapConnection(): Promise<{ success: boolean; message: string }> {
+    const config = await this.serverConfigRepository.findOne({ where: { id: 1 } });
+    if (!config || !config.ldap_enabled) {
+      return { success: false, message: 'Active Directory / LDAP is currently disabled in server configuration.' };
+    }
+
+    if (!config.ldap_url) {
+      return { success: false, message: 'Server LDAP URL is missing. Please configure a valid ldap:// or ldaps:// URL.' };
+    }
+
+    const client = new Client({
+      url: config.ldap_url,
+      timeout: 10000,
+      connectTimeout: 10000,
+      strictDN: false,
+      tlsOptions: { rejectUnauthorized: false },
+    });
+
+    try {
+      await client.bind(config.ldap_bind_dn, config.ldap_bind_password);
+
+      let baseDnNote = '';
+      if (config.ldap_base_dn) {
+        try {
+          const { searchEntries } = await client.search(config.ldap_base_dn, {
+            scope: 'sub',
+            filter: '(|(&(objectCategory=person)(objectClass=user))(&(objectClass=user)(!(objectClass=computer)))(objectClass=inetOrgPerson)(objectClass=*))',
+            sizeLimit: 1,
+            timeLimit: 5,
+          });
+          baseDnNote = ` Base DN "${config.ldap_base_dn}" validated successfully (${searchEntries.length} root entry found).`;
+        } catch (searchErr) {
+          baseDnNote = ` Warning: Bind succeeded, but Base DN query returned: ${searchErr.message}.`;
+        }
+      }
+
+      await client.unbind();
+      return {
+        success: true,
+        message: `Successfully connected to LDAP server at ${config.ldap_url} and verified Bind DN (${config.ldap_bind_dn}).${baseDnNote}`,
+      };
+    } catch (err) {
+      try { await client.unbind(); } catch (_) {}
+      const errMsg = err.message || '';
+      let hint = '';
+      if (errMsg.includes('getaddrinfo') || errMsg.includes('ENOTFOUND') || errMsg.includes('EAI_AGAIN')) {
+        hint = ' [DNS Resolution Failed]: The container cannot resolve the Active Directory hostname. You can either: 1) Use the direct IP address in the Server LDAP URL (e.g. ldap://192.168.1.10:389), or 2) Configure AD_HOST_ENTRY=hostname.domain.local:IP in your .env file.';
+      } else if (errMsg.includes('InvalidCredentialsError') || errMsg.includes('invalid credentials')) {
+        hint = ' [Invalid Credentials]: Please verify that your Bind DN user and Bind password are correct.';
+      }
+      return {
+        success: false,
+        message: `LDAP Connection failed: ${errMsg}.${hint}`,
+      };
+    }
   }
 
   // Sync Users from Active Directory / LDAP
-  async syncLdapUsers() {
-    const adDirectoryUsers = [
-      { full_name: 'David AD Manager', email: 'david.ad@company.com', department: 'Finance', role_id: 2, external_id: 'AD-9001' },
-      { full_name: 'Sarah AD Employee', email: 'sarah.ad@company.com', department: 'Finance', role_id: 1, external_id: 'AD-9002' },
-      { full_name: 'Robert AD IT Lead', email: 'robert.ad@company.com', department: 'IT Support', role_id: 3, external_id: 'AD-9003' },
-    ];
+  async syncLdapUsers(): Promise<{ success: boolean; message: string; totalSynced?: number; newlyCreated?: number }> {
+    const config = await this.serverConfigRepository.findOne({ where: { id: 1 } });
+    if (!config || !config.ldap_enabled) {
+      throw new BadRequestException('Active Directory / LDAP is disabled in server configuration.');
+    }
 
-    const defaultPasswordHash = await bcrypt.hash('admin123', 10);
+    if (!config.ldap_url) {
+      throw new BadRequestException('Active Directory / LDAP URL is not configured.');
+    }
+
+    const client = new Client({
+      url: config.ldap_url,
+      timeout: 30000,
+      connectTimeout: 15000,
+      strictDN: false,
+      tlsOptions: { rejectUnauthorized: false },
+    });
+
+    let ldapUsers: Array<{
+      full_name: string;
+      email: string;
+      department: string;
+      external_id?: string;
+      role_id: number;
+      is_active: boolean;
+    }> = [];
+
+    try {
+      await client.bind(config.ldap_bind_dn, config.ldap_bind_password);
+
+      const baseDn = config.ldap_base_dn || 'DC=company,DC=local';
+      const domainName = extractDomainFromDn(baseDn);
+
+      // Search filter for human directory users:
+      // 1. (&(objectCategory=person)(objectClass=user)) -> Standard Active Directory user accounts (cleanly excludes computers)
+      // 2. (&(objectClass=user)(!(objectClass=computer))) -> OpenLDAP / Samba4 / FreeIPA user accounts
+      // 3. (objectClass=inetOrgPerson) -> Standard LDAP inetOrgPerson accounts
+      const searchFilter = '(|(&(objectCategory=person)(objectClass=user))(&(objectClass=user)(!(objectClass=computer)))(objectClass=inetOrgPerson))';
+
+      const { searchEntries } = await client.search(baseDn, {
+        scope: 'sub',
+        filter: searchFilter,
+        attributes: [
+          'dn',
+          'sAMAccountName',
+          'mail',
+          'userPrincipalName',
+          'displayName',
+          'cn',
+          'givenName',
+          'sn',
+          'department',
+          'uid',
+          'memberOf',
+          'title',
+          'userAccountControl',
+        ],
+        paged: { pageSize: 250 },
+        timeLimit: 60,
+      });
+
+      console.log(`[LDAP Sync] Search returned ${searchEntries.length} entries for Base DN "${baseDn}". Processing user attributes...`);
+
+      for (const entry of searchEntries) {
+        const rawMail = getLdapString(entry.mail);
+        const rawUpn = getLdapString(entry.userPrincipalName);
+        const rawSam = getLdapString(entry.sAMAccountName);
+        const rawUid = getLdapString(entry.uid);
+
+        // Skip computer / machine accounts if any passed through (machine sAMAccountNames end with $)
+        if (rawSam.endsWith('$')) {
+          continue;
+        }
+
+        // Derive primary email address
+        let email = '';
+        if (rawMail && rawMail.includes('@')) {
+          email = rawMail;
+        } else if (rawUpn && rawUpn.includes('@')) {
+          email = rawUpn;
+        } else if (rawSam) {
+          email = `${rawSam}@${domainName}`;
+        } else if (rawUid) {
+          email = `${rawUid}@${domainName}`;
+        }
+
+        // Derive display full name
+        const rawDisplayName = getLdapString(entry.displayName);
+        const rawGivenName = getLdapString(entry.givenName);
+        const rawSn = getLdapString(entry.sn);
+        const rawCn = getLdapString(entry.cn);
+        const combinedName = rawGivenName && rawSn ? `${rawGivenName} ${rawSn}` : '';
+        const fullName = rawDisplayName || combinedName || rawCn || rawSam || rawUid || 'AD User';
+
+        // Department
+        const department = getLdapString(entry.department) || 'General';
+
+        // External ID (sAMAccountName or uid)
+        const externalId = rawSam || rawUid || undefined;
+
+        // Active / Disabled status check from Active Directory userAccountControl
+        // In AD: bit 2 (0x0002) = ACCOUNTDISABLE
+        const uacStr = getLdapString(entry.userAccountControl);
+        const uac = uacStr ? parseInt(uacStr, 10) : 0;
+        const isDisabled = !isNaN(uac) && (uac & 2) === 2;
+
+        // Dynamic Role Resolution based on AD group memberships and title
+        const memberOfList = getLdapStringArray(entry.memberOf);
+        const title = getLdapString(entry.title);
+        const resolvedRoleId = resolveRoleFromAdGroupsAndTitle(memberOfList, title, department);
+
+        if (email && email.includes('@')) {
+          ldapUsers.push({
+            full_name: fullName.trim(),
+            email: email.toLowerCase().trim(),
+            department: department.trim(),
+            external_id: externalId,
+            role_id: resolvedRoleId,
+            is_active: !isDisabled,
+          });
+        }
+      }
+
+      await client.unbind();
+    } catch (ldapErr) {
+      try { await client.unbind(); } catch (_) {}
+      const errMsg = ldapErr.message || '';
+      let hint = '';
+      if (errMsg.includes('getaddrinfo') || errMsg.includes('ENOTFOUND') || errMsg.includes('EAI_AGAIN')) {
+        hint = ' [DNS Resolution Failed]: The container cannot resolve the Active Directory hostname. You can either: 1) Use the direct IP address in the Server LDAP URL (e.g. ldap://192.168.1.10:389), or 2) Configure AD_HOST_ENTRY=hostname.domain.local:IP in your .env file.';
+      }
+      console.warn(`[LDAP Sync Error] Search failed (${errMsg}).`);
+      return {
+        success: false,
+        message: `Could not sync from LDAP server (${config.ldap_url}): ${errMsg}.${hint} Ensure LDAP server is reachable and Bind DN credentials are correct.`,
+        totalSynced: 0,
+        newlyCreated: 0,
+      };
+    }
+
+    const defaultPasswordHash = await bcrypt.hash('User@123', 10);
     let createdCount = 0;
+    let elevatedCount = 0;
+    let updatedCount = 0;
 
-    for (const adUser of adDirectoryUsers) {
-      const existing = await this.userRepository.findOne({ where: { email: adUser.email } });
+    for (const adUser of ldapUsers) {
+      const existing = await this.userRepository.findOne({ where: { email: adUser.email }, relations: { role: true } });
       if (!existing) {
         const newUser = this.userRepository.create({
           full_name: adUser.full_name,
           email: adUser.email,
           password: defaultPasswordHash,
           department: adUser.department,
-          role: { id: adUser.role_id },
+          role: { id: adUser.role_id }, // Automatically set role based on AD group privileges
           auth_source: 'AD',
           external_id: adUser.external_id,
-          is_active: true,
+          is_active: adUser.is_active,
         });
         await this.userRepository.save(newUser);
         createdCount++;
+        if (adUser.role_id > 1) elevatedCount++;
+      } else {
+        let changed = false;
+        if (existing.auth_source !== 'AD') {
+          existing.auth_source = 'AD';
+          changed = true;
+        }
+        if (adUser.external_id && existing.external_id !== adUser.external_id) {
+          existing.external_id = adUser.external_id;
+          changed = true;
+        }
+        if (adUser.department && existing.department !== adUser.department) {
+          existing.department = adUser.department;
+          changed = true;
+        }
+        if (existing.is_active !== adUser.is_active) {
+          existing.is_active = adUser.is_active;
+          changed = true;
+        }
+        // If user's AD group membership has elevated their privileges
+        if (adUser.role_id > 1 && (!existing.role || existing.role.id !== adUser.role_id)) {
+          existing.role = { id: adUser.role_id } as any;
+          changed = true;
+          elevatedCount++;
+        }
+        if (changed) {
+          await this.userRepository.save(existing);
+          updatedCount++;
+        }
       }
     }
 
     return {
       success: true,
-      message: `Active Directory synchronization completed successfully. ${createdCount} new users imported from ${this.serverConfigState.ldapUrl}.`,
-      totalSynced: adDirectoryUsers.length,
+      message: `Active Directory synchronization completed successfully. ${createdCount} new users created, ${updatedCount} existing users updated, ${elevatedCount} elevated roles synchronized, ${ldapUsers.length} total directory users discovered from ${config.ldap_url}.`,
+      totalSynced: ldapUsers.length,
       newlyCreated: createdCount,
     };
   }
@@ -128,9 +381,15 @@ export class AdminConfigService {
   // Super Admin Database Export / Backup
   async exportDatabaseBackup() {
     const dataSource = this.categoryRepository.manager.connection;
+    const currentConfig = await this.getServerConfig();
 
     const roles = await dataSource.getRepository('Role').find();
-    const users = await dataSource.getRepository('User').find({ relations: { role: true, manager: true } });
+    const users = await dataSource.getRepository('User')
+      .createQueryBuilder('user')
+      .addSelect('user.password')
+      .leftJoinAndSelect('user.role', 'role')
+      .leftJoinAndSelect('user.manager', 'manager')
+      .getMany();
     const categories = await dataSource.getRepository('Category').find({ relations: { parent: true } });
     const workflowSteps = await dataSource.getRepository('WorkflowStep').find({ relations: { category: true, approver_role: true } });
     const requests = await dataSource.getRepository('Request').find({ relations: { category: true, requestor: true, designated_manager: true, assigned_agent: true, closed_by: true } });
@@ -141,9 +400,9 @@ export class AdminConfigService {
 
     return {
       version: '1.0.0',
-      systemName: this.serverConfigState.systemName,
+      systemName: currentConfig.systemName,
       timestamp: new Date().toISOString(),
-      serverConfig: this.serverConfigState,
+      serverConfig: currentConfig,
       data: {
         roles,
         users,
@@ -171,7 +430,7 @@ export class AdminConfigService {
 
     try {
       if (backupData.serverConfig) {
-        this.serverConfigState = { ...this.serverConfigState, ...backupData.serverConfig };
+        await this.updateServerConfig(backupData.serverConfig);
       }
 
       await queryRunner.query('TRUNCATE TABLE approval_logs, request_updates, request_attachments, request_fields, requests, workflow_steps, categories, users CASCADE;');
@@ -180,12 +439,16 @@ export class AdminConfigService {
 
       // 1. Users Pass 1 (without manager_id to avoid FK dependency order issue)
       if (data.users && data.users.length > 0) {
+        const fallbackPasswordHash = await bcrypt.hash('admin123', 10);
         for (const u of data.users) {
+          const passwordToInsert = (u.password && typeof u.password === 'string' && u.password.trim().length > 0)
+            ? u.password
+            : fallbackPasswordHash;
           await queryRunner.query(
             `INSERT INTO users (id, full_name, email, password, department, role_id, manager_id, external_id, auth_source, is_active, created_at, updated_at) 
              VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8, $9, $10, $11)
-             ON CONFLICT (id) DO NOTHING;`,
-            [u.id, u.full_name, u.email, u.password, u.department, u.role?.id || u.role_id || 1, u.external_id || null, u.auth_source || 'Local', u.is_active !== false, u.created_at || new Date(), u.updated_at || new Date()]
+             ON CONFLICT (id) DO UPDATE SET password = EXCLUDED.password;`,
+            [u.id, u.full_name, u.email, passwordToInsert, u.department, u.role?.id || u.role_id || 1, u.external_id || null, u.auth_source || 'Local', u.is_active !== false, u.created_at || new Date(), u.updated_at || new Date()]
           );
         }
 
