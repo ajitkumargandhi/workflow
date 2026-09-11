@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Put, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Put, Query, UseGuards, Req } from '@nestjs/common';
 import { RequestService } from '../services/request.service';
 import { WorkflowService } from '../services/workflow.service';
 import { Request } from '../entities/request.entity';
@@ -18,19 +18,32 @@ export class RequestController {
       requestData: Partial<Request> & { category_id?: number; designated_manager_id?: string }, 
       fields: any[], 
       attachments: any[] 
-    }
+    },
+    @Req() req: any
   ) {
+    // Ensure requestor is the authenticated user if not explicitly specified
+    if (!body.requestData.requestor && req.user?.sub) {
+      body.requestData.requestor = { id: req.user.sub } as any;
+    }
     return this.requestService.createRequest(body.requestData, body.fields, body.attachments);
   }
 
   @Get()
-  async getMyRequests(@Query('userId') userId?: string) {
-    return this.requestService.getMyRequests(userId || 'all');
+  async getMyRequests(@Req() req: any, @Query('userId') userId?: string) {
+    const currentUserId = req.user?.sub;
+    const currentUserRole = req.user?.role;
+    const isElevated = currentUserRole === 'Super Admin' || currentUserRole === 'Admin Agent' || currentUserRole === 'IT Agent';
+    const targetUserId = isElevated ? (userId || currentUserId || 'all') : (currentUserId || userId || 'all');
+    return this.requestService.getMyRequests(targetUserId);
   }
 
   @Get('actioned')
-  async getActionedRequests(@Query('userId') userId?: string) {
-    return this.requestService.getActionedRequests(userId || 'all');
+  async getActionedRequests(@Req() req: any, @Query('userId') userId?: string) {
+    const currentUserId = req.user?.sub;
+    const currentUserRole = req.user?.role;
+    const isElevated = currentUserRole === 'Super Admin' || currentUserRole === 'Admin Agent';
+    const targetUserId = isElevated ? (userId || currentUserId || 'all') : (currentUserId || userId);
+    return this.requestService.getActionedRequests(targetUserId);
   }
 
   @Get(':id')
@@ -42,36 +55,44 @@ export class RequestController {
   async takeAction(
     @Param('id') id: string,
     @Body() body: { 
-      approverId: string, 
+      approverId?: string, 
       action: 'Approve' | 'Reject' | 'SendBack', 
       comments: string 
-    }
+    },
+    @Req() req: any
   ) {
-    return this.workflowService.processAction(id, body.approverId, body.action, body.comments);
+    const approverId = req.user?.sub || body.approverId;
+    return this.workflowService.processAction(id, approverId, body.action, body.comments);
   }
 
   @Post(':id/work-update')
   async addWorkUpdate(
     @Param('id') id: string,
-    @Body() body: { agentId: string; note: string; status?: string }
+    @Body() body: { agentId?: string; note: string; status?: string },
+    @Req() req: any
   ) {
-    return this.requestService.addWorkUpdate(id, body.agentId, body.note, body.status);
+    const agentId = req.user?.sub || body.agentId;
+    return this.requestService.addWorkUpdate(id, agentId, body.note, body.status);
   }
 
   @Put(':id/fulfill')
   async fulfill(
     @Param('id') id: string,
-    @Body() body: { notes: string; agentId?: string }
+    @Body() body: { notes: string; agentId?: string },
+    @Req() req: any
   ) {
-    return this.requestService.fulfillRequest(id, body.notes, body.agentId);
+    const agentId = req.user?.sub || body.agentId;
+    return this.requestService.fulfillRequest(id, body.notes, agentId);
   }
 
   @Put(':id/close')
   async close(
     @Param('id') id: string,
-    @Body() body: { userId: string; notes?: string }
+    @Body() body: { userId?: string; notes?: string },
+    @Req() req: any
   ) {
-    return this.requestService.closeRequest(id, body.userId, body.notes);
+    const userId = req.user?.sub || body.userId;
+    return this.requestService.closeRequest(id, userId, body.notes);
   }
 
   @Put(':id')
