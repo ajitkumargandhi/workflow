@@ -86,14 +86,12 @@ const SupportDashboard = () => {
         note: workNote,
         status: newStatus,
       });
-      setStatus('Work update added!');
+      setStatus('Work update added successfully!');
       setWorkNote('');
-      setTimeout(() => setStatus(''), 3000);
-      
-      // Refresh details & queue
-      const updatedDetails = await requestService.getRequestDetails(selectedRequest.id);
-      setRequestDetails(updatedDetails);
+      setSelectedRequest(null);
+      setRequestDetails(null);
       fetchFilteredRequests();
+      setTimeout(() => setStatus(''), 4000);
     } catch (err) {
       setStatus('Error adding update: ' + err.message);
     }
@@ -110,11 +108,10 @@ const SupportDashboard = () => {
         agentId: currentUser?.id,
       });
       setStatus('Request marked as Fulfilled successfully!');
-      setTimeout(() => setStatus(''), 3000);
-      
-      const updatedDetails = await requestService.getRequestDetails(selectedRequest.id);
-      setRequestDetails(updatedDetails);
+      setSelectedRequest(null);
+      setRequestDetails(null);
       fetchFilteredRequests();
+      setTimeout(() => setStatus(''), 4000);
     } catch (err) {
       setStatus('Error: ' + (err.response?.data?.message || err.message));
     }
@@ -129,11 +126,10 @@ const SupportDashboard = () => {
         notes: 'Ticket marked as Closed by Support Team.',
       });
       setStatus('Ticket closed successfully!');
-      setTimeout(() => setStatus(''), 3000);
-
-      const updatedDetails = await requestService.getRequestDetails(selectedRequest.id);
-      setRequestDetails(updatedDetails);
+      setSelectedRequest(null);
+      setRequestDetails(null);
       fetchFilteredRequests();
+      setTimeout(() => setStatus(''), 4000);
     } catch (err) {
       setStatus('Error closing ticket: ' + err.message);
     }
